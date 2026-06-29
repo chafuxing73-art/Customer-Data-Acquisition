@@ -37,7 +37,6 @@ temp/
 
 uploads/
 
-config.json
 *.local.json
 *.secret.json
 

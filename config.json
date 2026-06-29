@@ -1,0 +1,13 @@
+{
+    "alibaba": {
+        "username": "cn1541588365uauh",
+        "password": "ALJL20250313xmb",
+        "login_url": "https://login.alibaba.com/mini_login.htm?lang=zh_CN&appName=nemesis&appEntrance=alibaba&styleType=vertical",
+        "target_url": "https://onetouch-partner.alibaba.com/ptnBase/luyou/express/list.htm"
+    },
+    "keep_alive": {
+        "enabled": true,
+        "interval_minutes": 30,
+        "check_url": "https://onetouch-partner.alibaba.com/ptnBase/luyou/logistics/listCustomersByPartnerId.json"
+    }
+}
