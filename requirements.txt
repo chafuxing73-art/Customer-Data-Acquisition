@@ -1,0 +1,5 @@
+Flask==3.0.0
+Werkzeug==3.0.0
+requests==2.26.0
+pycryptodome==3.20.0
+DrissionPage

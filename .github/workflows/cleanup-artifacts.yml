@@ -1,0 +1,98 @@
+name: Cleanup Old Artifacts
+
+on:
+  # 每周一凌晨2点自动运行
+  schedule:
+    - cron: '0 2 * * 1'
+  # 支持手动触发
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: '模拟运行（不实际删除）'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write  # 需要写入权限才能删除 artifacts
+    steps:
+      - name: Delete old artifacts
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const dryRun = '${{ github.event.inputs.dry_run }}' === 'true';
+            const retentionDays = 7; // 保留最近7天的 artifacts
+            const retentionMs = retentionDays * 24 * 60 * 60 * 1000;
+            const now = Date.now();
+            let totalDeleted = 0;
+            let totalSizeMB = 0;
+
+            console.log(`🧹 开始清理 ${dryRun ? '【模拟模式】' : ''}`);
+            console.log(`📅 保留策略：删除 ${retentionDays} 天前的 artifacts\n`);
+
+            // 分页获取所有 artifacts
+            const artifacts = await github.paginate(
+              github.rest.actions.listArtifactsForRepo,
+              {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                per_page: 100,
+              }
+            );
+
+            console.log(`📦 仓库中共有 ${artifacts.length} 个 artifacts`);
+
+            for (const artifact of artifacts) {
+              const ageMs = now - new Date(artifact.created_at).getTime();
+              const ageDays = Math.floor(ageMs / (24 * 60 * 60 * 1000));
+              const sizeMB = (artifact.size_in_bytes / 1024 / 1024).toFixed(2);
+
+              if (ageMs > retentionMs) {
+                console.log(
+                  `🗑️  ${dryRun ? '[将删除]' : '[删除]'}` +
+                  ` ${artifact.name} (ID: ${artifact.id})` +
+                  ` | 创建于 ${artifact.created_at}` +
+                  ` | 已存在 ${ageDays} 天` +
+                  ` | 大小 ${sizeMB} MB`
+                );
+
+                if (!dryRun) {
+                  try {
+                    await github.rest.actions.deleteArtifact({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      artifact_id: artifact.id,
+                    });
+                    totalDeleted++;
+                    totalSizeMB += parseFloat(sizeMB);
+                  } catch (error) {
+                    console.log(`❌ 删除失败: ${error.message}`);
+                  }
+                } else {
+                  totalDeleted++;
+                  totalSizeMB += parseFloat(sizeMB);
+                }
+              } else {
+                console.log(
+                  `✅ 保留 ${artifact.name} (ID: ${artifact.id})` +
+                  ` | 已存在 ${ageDays} 天` +
+                  ` | 大小 ${sizeMB} MB`
+                );
+              }
+            }
+
+            console.log(`\n📊 清理统计：`);
+            console.log(`   待删除/已删除: ${totalDeleted} 个 artifacts`);
+            console.log(`   释放空间: ${totalSizeMB.toFixed(2)} MB`);
+
+            if (dryRun) {
+              console.log(`\n💡 这是模拟运行，没有实际删除任何文件。`);
+              console.log(`   如需真正清理，请重新运行并将 dry_run 设为 false。`);
+            }

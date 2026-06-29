@@ -1,0 +1,94 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run tests
+        run: |
+          # 这里可以添加测试命令，例如 pytest
+          # pytest
+          echo "No tests configured yet"
+
+      - name: Build application
+        run: |
+          # 构建应用，这里主要是验证代码语法
+          python -m py_compile app.py data_processing.py process_onetouch_to_wedoc.py
+
+  docker-build:
+    needs: build-test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Cache Docker layers
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-
+
+      - name: Build Docker image using docker build
+        run: |
+          docker build -t customer-data-fetch:latest .
+          echo "=== Docker images after build ==="
+          docker images
+
+      - name: Verify image exists
+        run: |
+          if docker images | grep -q customer-data-fetch; then
+            echo "Image exists, proceeding..."
+          else
+            echo "Image does not exist, exiting..."
+            exit 1
+          fi
+
+      - name: Save Docker image to file
+        run: |
+          echo "Creating artifacts directory..."
+          mkdir -p artifacts
+          echo "Saving image (gzip compressed)..."
+          docker save customer-data-fetch:latest | gzip -1 > artifacts/customer-data-fetch-${{ github.sha }}.tar.gz
+          echo "Saved image successfully"
+          ls -lh artifacts/
+
+      - name: Upload Docker image as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-image
+          path: artifacts/customer-data-fetch-${{ github.sha }}.tar.gz
+          retention-days: 3
+          compression-level: 0
