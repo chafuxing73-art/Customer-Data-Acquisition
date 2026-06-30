@@ -1491,12 +1491,12 @@ def index() -> str:
 @app.route("/dingtalk/webhook", methods=["POST"])
 def dingtalk_webhook() -> str:
     try:
-        data = request.get_json()
+        raw_body = request.get_data().decode('utf-8', errors='replace')
+        LOGGER.info(f"收到钉钉请求原始数据: {raw_body[:500]}")
+        
+        data = request.get_json(silent=True)
         if not data:
             data = {}
-        
-        raw_body = request.get_data().decode('utf-8')
-        LOGGER.info(f"收到钉钉请求原始数据: {raw_body[:500]}")
         
         text = ""
         if isinstance(data, dict):
@@ -1510,12 +1510,13 @@ def dingtalk_webhook() -> str:
         
         if not text:
             import re
+            all_matches = []
             for pattern in [r'ALS\d{11,13}', r'\d{18,21}']:
-                matches = re.findall(pattern, raw_body)
-                if matches:
-                    text = matches[0]
-                    LOGGER.info(f"从原始数据中提取订单号: {text}")
-                    break
+                matches = re.findall(pattern, raw_body, re.IGNORECASE)
+                all_matches.extend(matches)
+            if all_matches:
+                text = " ".join(all_matches)
+                LOGGER.info(f"从原始数据中提取订单号: {text}")
         
         if not text:
             LOGGER.error("消息内容为空")
@@ -1639,8 +1640,8 @@ def dingtalk_webhook() -> str:
         
         import concurrent.futures
         with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-            futures = {executor.submit(query_order, order_number): order_number for order_number in order_numbers[:5]}
-            for future in concurrent.futures.as_completed(futures, timeout=8):
+            futures = {executor.submit(query_order, order_number): order_number for order_number in order_numbers[:20]}
+            for future in concurrent.futures.as_completed(futures, timeout=60):
                 try:
                     results.append(future.result())
                 except concurrent.futures.TimeoutError:
