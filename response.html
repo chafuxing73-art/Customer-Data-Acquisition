@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>数据处理工具</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f4f4f4;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input[type="text"], input[type="file"] {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        .result {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #f9f9f9;
+            border-radius: 4px;
+        }
+        .success {
+            color: green;
+        }
+        .error {
+            color: red;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+        }
+        th, td {
+            padding: 8px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        th {
+            background-color: #f2f2f2;
+        }
+        .json-display {
+            background-color: #f5f5f5;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            font-family: monospace;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>数据处理工具</h1>
+        
+        <!-- 表单 -->
+        <form method="post">
+            <div class="form-group">
+                <label>获取方式</label>
+                <div>
+                    <input type="radio" id="live_api" name="use_fixture" value="off" checked>
+                    <label for="live_api">直接调取接口</label>
+                    <input type="radio" id="use_fixture" name="use_fixture" value="on">
+                    <label for="use_fixture">使用响应文件</label>
+                </div>
+            </div>
+            <div class="form-group">
+                <label for="order_numbers">阿里单号（每行一个）</label>
+                <textarea id="order_numbers" name="order_numbers" rows="5" placeholder="请输入阿里单号，每行一个" required>ALS01481544388</textarea>
+            </div>
+            <div class="form-group">
+                <label>
+                    <input type="checkbox" name="push_wedoc" checked>
+                    发送到企业微信文档
+                </label>
+            </div>
+            <div class="form-group">
+                <label for="extra_fields">额外空字段（逗号分隔）</label>
+                <input type="text" id="extra_fields" name="extra_fields" placeholder="如：fabcde,fA8znU,fg4QC7">
+            </div>
+            <button type="submit">处理并发送</button>
+        </form>
+        
+        <!-- 错误信息 -->
+        
+            <div class="result error">
+                <h2>错误信息</h2>
+                <p>单号 ALS01481544389: &#39;NoneType&#39; object is not iterable</p>
+            </div>
+        
+        
+        <!-- 处理结果 -->
+        
+            
+                <div class="result">
+                    <h2>处理结果 - ALS01481544388</h2>
+                    
+                    <h3>基本信息</h3>
+                    <p><strong>单号：</strong>ALS01481544388</p>
+                    <p><strong>获取方式：</strong>实时接口</p>
+                    
+                    
+                    
+                    <h3>提取的字段</h3>
+                    <table>
+                        <tr>
+                            <th>字段名</th>
+                            <th>值</th>
+                        </tr>
+                        
+                            <tr>
+                                <td>email</td>
+                                <td>honey@cnbeautypackaging.com</td>
+                            </tr>
+                        
+                            <tr>
+                                <td>mobileNo</td>
+                                <td>15062106279</td>
+                            </tr>
+                        
+                            <tr>
+                                <td>sellerLoginId</td>
+                                <td>cn1520224847xaff</td>
+                            </tr>
+                        
+                            <tr>
+                                <td>customerName</td>
+                                <td>江阴美韵包装材料有限公司</td>
+                            </tr>
+                        
+                            <tr>
+                                <td>solutionName</td>
+                                <td>非半托管</td>
+                            </tr>
+                        
+                            <tr>
+                                <td>orderNumber</td>
+                                <td>ALS01481544388</td>
+                            </tr>
+                        
+                    </table>
+                    
+                    <h3>构造的数据</h3>
+                    <div class="json-display">
+                        {
+  "add_records": [
+    {
+      "values": {
+        "f3Vstd": "cn1520224847xaff",
+        "f6KONI": 15062106279,
+        "f9pjS2": "",
+        "fA8znU": [],
+        "fE2nO0": "honey@cnbeautypackaging.com",
+        "faGx63": [
+          {
+            "text": "\u975e\u534a\u6258\u7ba1"
+          }
+        ],
+        "fabcde": "1774337237797",
+        "fg4QC7": [],
+        "fhD9aC": "",
+        "flosGy": "ALS01481544388",
+        "fp8HnB": "",
+        "fwpa5L": [],
+        "fyNfPg": "\u6c5f\u9634\u7f8e\u97f5\u5305\u88c5\u6750\u6599\u6709\u9650\u516c\u53f8",
+        "fz0a0D": ""
+      }
+    }
+  ],
+  "schema": {
+    "f3Vstd": "\u4e0b\u5355\u8d26\u53f7\uff08\u4f1a\u5458\u540d\uff09",
+    "f6KONI": "\u7535\u8bdd",
+    "f9pjS2": "\u673a\u5668\u4eba\u62a5\u9519\u4fe1\u606f",
+    "fA8znU": "\u975e\u534a\u6258\u7ba1\u95ee\u9898\u7c7b\u578b",
+    "fE2nO0": "\u90ae\u7bb1",
+    "faGx63": "\u534a\u6258\u7ba1/\u975e\u534a\u6258\u7ba1",
+    "fabcde": "\u767b\u8bb0\u65e5\u671f",
+    "fg4QC7": "\u534a\u6258\u7ba1\u95ee\u9898\u7c7b\u578b",
+    "fhD9aC": "\u95ee\u9898\u63cf\u8ff0",
+    "flosGy": "\u8ba2\u5355\u53f7",
+    "fp8HnB": "\u5ba2\u6237\u8bc9\u6c42",
+    "fwpa5L": "\u9644\u4ef6",
+    "fyNfPg": "\u7528\u6237\u540d\u79f0",
+    "fz0a0D": "\u5de5\u5355\u53f7"
+  }
+}
+                    </div>
+                    
+                    
+                        <h3>发送结果</h3>
+                        <div class="json-display success">
+                            {
+  "add_records": [
+    {
+      "record_id": "c6x1xa",
+      "values": {
+        "f3Vstd": [
+          {
+            "text": "cn1520224847xaff",
+            "type": "text"
+          }
+        ],
+        "f6KONI": 15062106279,
+        "f9pjS2": [
+          {
+            "text": "",
+            "type": "text"
+          }
+        ],
+        "fA8znU": [],
+        "fE2nO0": "honey@cnbeautypackaging.com",
+        "faGx63": [
+          "oIwFFW"
+        ],
+        "fabcde": "1774337237797",
+        "fg4QC7": [],
+        "fhD9aC": [
+          {
+            "text": "",
+            "type": "text"
+          }
+        ],
+        "flosGy": [
+          {
+            "text": "ALS01481544388",
+            "type": "text"
+          }
+        ],
+        "fp8HnB": [
+          {
+            "text": "",
+            "type": "text"
+          }
+        ],
+        "fwpa5L": [],
+        "fyNfPg": [
+          {
+            "text": "\u6c5f\u9634\u7f8e\u97f5\u5305\u88c5\u6750\u6599\u6709\u9650\u516c\u53f8",
+            "type": "text"
+          }
+        ],
+        "fz0a0D": [
+          {
+            "text": "",
+            "type": "text"
+          }
+        ]
+      }
+    }
+  ],
+  "errcode": 0,
+  "errmsg": "ok"
+}
+                        </div>
+                    
+                </div>
+            
+        
+    </div>
+</body>
+</html>

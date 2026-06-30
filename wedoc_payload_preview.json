@@ -1,0 +1,63 @@
+{
+  "schema": {
+    "flosGy": {
+      "label": "订单号",
+      "source_field": "orderNumber",
+      "type": "text",
+      "empty": ""
+    },
+    "f3Vstd": {
+      "label": "下单账号",
+      "source_field": "sellerLoginId",
+      "type": "text",
+      "empty": ""
+    },
+    "fyNfPg": {
+      "label": "用户名称",
+      "source_field": "customerName",
+      "type": "text",
+      "empty": ""
+    },
+    "f6KONI": {
+      "label": "电话",
+      "source_field": "mobileNo",
+      "type": "text",
+      "empty": ""
+    },
+    "fE2nO0": {
+      "label": "邮箱",
+      "source_field": "email",
+      "type": "text",
+      "empty": ""
+    },
+    "faGx63": {
+      "label": "方案类型",
+      "source_field": "solutionName",
+      "type": "select",
+      "empty": []
+    },
+    "fLogistics": {
+      "label": "揽收信息",
+      "source_field": "logisticsCompanyName",
+      "type": "text",
+      "empty": ""
+    }
+  },
+  "add_records": [
+    {
+      "values": {
+        "flosGy": "ALS01678077151",
+        "f3Vstd": "",
+        "fyNfPg": "",
+        "f6KONI": "19924749931",
+        "fE2nO0": "19924749931@163.com",
+        "faGx63": [
+          {
+            "text": "非半托管"
+          }
+        ],
+        "fLogistics": "阿里官方揽收(顺丰)"
+      }
+    }
+  ]
+}

@@ -1,0 +1,45 @@
+GET /ptnBase/luyou/express/order/list.json?_tb_token_=388387077d6f8&ctoken=ww06c_am7k3&json=%7B%22statusType%22%3A%22ALL%22%2C%22source%22%3Anull%2C%22generalSearchField%22%3A%22300589170001022598%22%2C%22queryNewList%22%3Atrue%2C%22serviceType%22%3Anull%2C%22statusList%22%3A%5B%5D%2C%22queryPayStatus%22%3Anull%2C%22exceptionOrderStatus%22%3Anull%2C%22currentPage%22%3A1%2C%22pageSize%22%3A10%2C%22sort%22%3A%7B%7D%2C%22needConsignorAddress%22%3Atrue%2C%22needConsigneeAddress%22%3Atrue%7D h2
+host: onetouch-partner.alibaba.com
+sec-ch-ua-platform: "Windows"
+user-agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36
+sec-ch-ua: "Chromium";v="148", "Google Chrome";v="148", "Not/A)Brand";v="99"
+sec-ch-ua-mobile: ?0
+bx-v: 2.5.11
+accept: */*
+sec-fetch-site: same-origin
+sec-fetch-mode: cors
+sec-fetch-dest: empty
+referer: https://onetouch-partner.alibaba.com/ptnBase/luyou/express/list.htm
+accept-encoding: gzip, deflate, br, zstd
+accept-language: zh-CN,zh;q=0.9
+cookie: recommend_login=email
+cookie: xman_i=aid=2211572780153
+cookie: ali_apache_track=mt=2|mid=cn1541588365uauh
+cookie: ali_apache_id=33.8.180.46.1745802448842.960357.2
+cookie: cna=vXBwHivPxkMCAW8CRAxQLqeB
+cookie: xman_status2=0
+cookie: __itrace_wid=ca9fa3aa-260c-4bdc-bd3e-e35a0c1d621a
+cookie: havana_lgc2_4=
+cookie: bucket_id=40
+cookie: JSESSIONID=32A2815DCC0B47F9F695A92722D2503E
+cookie: sca=ae0076d0
+cookie: atpsida=42938d1d830c305cd3444644_1779866759_2
+cookie: xlly_s=1
+cookie: cookie2=14999ba6eb0d9e1f2f5d3106721bcc28
+cookie: ali_apache_tracktmp=W_signed=Y
+cookie: xman_us_f=x_locale=zh_CN&x_user=CN|JING|YANG|cnfm|251657152&no_popup_today=n&last_popup_time=1779866762667&x_l=1
+cookie: intl_common_forever=nA5P1iO/xPskObDXFrDWOmMmOOsSrsafwYELk2OsQSTdUaTb6+stvQ==
+cookie: xman_us_t=l_source=alibaba&sign=y&need_popup=y&x_user=siSau57pJPCDl0U7HYgwXHN1FmQc75rAwkxpfy64qDs=&ctoken=ww06c_am7k3&x_lid=cn1541588365uauh
+cookie: xman_f=oQN5DWe7xvnPrySDNVkHiGpM7HmQFX6oTdq4jbgFoiihPLs2TaecgsfP5yMCklgkcPRxFFARer4CQKdnZFbWjVg3bV4CsxXJxB/xCAL3TUBeNjTTJPoI4JDa1xB0bybc08Bzck1VBXvUOLdslCqFn2Oc2DktNpgyz6WNOrgyTqx8NhWkKdFzKS5B9rlSQONH/I2V2YfRii2fogsMznxoFyaWL/mET2Ggb4mD0MeFyTEZnLeuEFxIHMQO+Vbuh0dChKXuAYoCHTNyQGmEhbmowmkc+bH5IPRNBIkl0VBc7DKqscKSpigI1qlTdINr15bQ4qh0IZRwj6IRxdMZRE9YRrGh+ssT21126Hy8M2zPhb0I93yBQrF1AuvDUzd764etwCzlDwqD0O9leo2+01rXcGZyW0Jqq4KgAP+XGXpQHq3faJn2zFnUWymv//8ptyAnUdrWhDMtl+wLs28HOJ8C6w==
+cookie: acs_usuc_t=acs_rt=87820ba3fa854e909121b291c3b91230
+cookie: intl_locale=zh_CN
+cookie: _tb_token_=388387077d6f8
+cookie: icbu_s_tag=10_11
+cookie: _m_h5_tk=ff79c92ec8718e404867d038ebb49e96_1779873964890
+cookie: _m_h5_tk_enc=bd32428b75943760ba4304d03721c9d4
+cookie: xman_t=G49n7tq5+Uwuyw+R7a5b7R/l6FiGUcXsXdUJFzcsFwxivII2MtAXVzr0K6bcel16ZkhJVwhC7L76OEeOd2OlWAomZjHmuxn9jbrdvudpz6xNrGt6ixlEnPyY5aXZJfvWyMJzPIwAW21UhsJ5JgdPRiR5rqXZRabWqQkzdwyhXuRtHOO+TgXhaWN5bPh/6f+cHqo/60EMN3/xEIjZpKAtxDq5d2uZH7YlhP77JPv7AHM05uNsX+nBBKTgsFcDCf1Nr2JbWlXHvp3UaiEZMzexL1QtRg7pSgR6G4Q09iNGcod873ig7qJ+gUDesKqaaDeyg1qDxEHOANEmtPnG/nXjlw1an5ACKAYxa6bONRtMvdIVOe6I3sPWow7UNziDTUvzf02qbjR1iJrfeaWD3FufNVnM8Nx6PKS4qf41JZpDiyh7RGpuqe7zZmqtmUCyOI58yF/V+JeebpWa5neg0Rw5banAlL1qnkMPEpadMVkaKcX48Q4GuQXyVaBx4ASFobY/4SayYlDBUB/83jWoWhYipaTf1DE5CYrMbbBKa/CJs+k2NFEMQxzBy54mvC/opKbhpl25RZMo7z6MCSuPw2c7h9KsgrlXhQ9pwuZtvwa7klZWyVQRJyWiTwtvE1dy6XMdKZ3IpGQlFCvdhxsPXA5sMO48nkDwHe3rjBafEo+nUpwjupTVdftmdQgG5mgcXQW6zystff0+syYlhndlQZ9553RM/tRyOLPrE9MXBApWems=
+cookie: EGG_SESS=wQqrCXXaacOv4-mmPAop1Y1NJRQZXbvolUNOkjF8y7AYrWmAROvoReJxE95yoJ0NSuhjkr1V9QTCdRhYrcakXAcDLrcM4jLGz66m1Pr5gCY0rKG6WabIzKrsLNhjFSWgaDczMaRoFQtTrWXrJKjru2aJTpST8vPPYiZSmF0cZRCCbXlv9cRLHAqTX5G0JkAs82l--wMkmYemKch1XRj1esoD83RYRlSgAqarvhAtp-tRFvHIlDOhuSDmQEpT3kxkNpw5wEXAFfV73mr4c-lY3u4Sm72MRXw5WPJgAZG2OOw61z0JISXOw5YghXlwtfvq4klcmNd2AHjISAQipHFKnaoyiY1fQ5UWUPjWCubaSU-Yi2kTYHdo9RLjjXqmMteYpTtINO9n6GGUZoUxTgVzMdOewLQeXaHkzkazfTltw5a6bKHRZTdqmBNDJzejIJ6w5zMHz9tj2ZmLA2SKmgJEv8xR1_1L5MF5CdSVy7cvhdUEtlGx4eStZYgzLHA-7oytuMJdmvRK62IIaMiFsr6ZrZZ96qIY6nseYQ4dQPfogpC0HB-gtULsK6d-b_TTeHP4wllFeQt8ktiPHnmkjEvRPg==
+cookie: isg=BBYWufbUYPdAuFusMlNliiCjZ8wYt1rx6Cqn34B_-PmIQ7Xd6kFvAPF139-va1IJ
+cookie: tfstk=gCRZunVNOfha-ymkzUfqUnsOENfO9soSmIsfoEYc5GjG1ENVoHYy1nTGGsWDyH91lEDtuj-20q39ocK2gMY0GtMmBiVVxH2_51_6YS89oZ91fGtEuhTYGtA2kS7Don3OcVHBWFCAi0iWgbT9WO5ZSidVIkjhoeVgS5DCtbzsFkmSNbTgOfVxQ09fuqs5lZfcSGX0-27VrPfcoN0FxZ78nlxci2uFuZ4gmGVM-6bV7sjDms0UtMQciNxci28hvZcrKFY0Ta6i5tYBljkgyOskSMP0azQOID8_hSFYzNXGq9jgi9OF7OSk7QfosV7HOBW5driCtUpBjw5r_uQwKU5GuI3u3iW266Se4bVAJdxwttRIkbYC_ZWli9z0ie5Fv9R1ZbqFJpY6nCKauSb91Q6V29u0Mt1HNTvkbr3J-1bDDTdj25IMoUdJF_la2NJHz6Sz5oQ3a8RvQo2VIwQFV2uEei_qzPWnhqwYH9fR8gg15-eAIwQFV2uUH-BhvwSS5N1..
+priority: u=1, i
+
