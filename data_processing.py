@@ -34,7 +34,7 @@ def extract_fields(response_data, order_number):
                     'email': None,  # 响应中未提供
                     'mobileNo': None,  # 响应中未提供
                     'sellerLoginId': item.get('sellerLoginId'),
-                    'customerName': item.get('customerName'),
+                    'customerName': item.get('customerName') or (item.get('consignorAddress', {}) or {}).get('companyNameCn'),
                     'solutionName': '半托管' if '半托管' in item.get('solutionName', '') else '非半托管',
                     'orderNumber': item.get('orderNumber')
                 }

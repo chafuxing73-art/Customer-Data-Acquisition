@@ -905,7 +905,7 @@ def extract_business_data(record: Dict[str, Any]) -> Tuple[Dict[str, str], List[
         "email": str(contact.get("email") or ""),
         "mobileNo": str(contact.get("mobileNo") or ""),
         "sellerLoginId": str(record.get("sellerLoginId") or ""),
-        "customerName": str(record.get("customerName") or ""),
+        "customerName": str(record.get("customerName") or record.get("consignorAddress", {}).get("companyNameCn") or ""),
         "solutionName": solution_name,
         "orderNumber": str(record.get("orderNumber") or ""),
         "tradeBizId": str(record.get("tradeBizId") or ""),
