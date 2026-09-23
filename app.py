@@ -1149,6 +1149,55 @@ def _is_server_like_env() -> bool:
     return False
 
 
+def _find_chromium_binary() -> str:
+    """在常见位置搜索 Chrome / Chromium 可执行文件，返回完整路径；找不到返回空字符串"""
+    import sys
+    candidates = []
+
+    # 环境变量优先
+    env_path = os.environ.get("CHROMIUM_PATH", "").strip()
+    if env_path:
+        candidates.append(env_path)
+
+    if sys.platform == "win32":
+        candidates += [
+            r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+            r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+            os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"),
+            r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+            os.path.expandvars(r"%PROGRAMFILES%\Google\Chrome\Application\chrome.exe"),
+        ]
+    else:
+        # Linux / macOS
+        candidates += [
+            "/usr/bin/chromium",
+            "/usr/bin/chromium-browser",
+            "/snap/bin/chromium",
+            "/snap/chromium/current/usr/lib/chromium-browser/chrome",
+            "/usr/local/bin/chromium",
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        ]
+
+    for p in candidates:
+        try:
+            if p and os.path.isfile(p) and os.access(p, os.X_OK):
+                return p
+        except Exception:
+            pass
+
+    # 最后尝试 which 命令
+    try:
+        import shutil
+        for name in ("chromium", "chromium-browser", "chrome", "google-chrome", "google-chrome-stable", "msedge"):
+            found = shutil.which(name)
+            if found:
+                return found
+    except Exception:
+        pass
+
+    return ""
+
+
 def login_alibaba(username: str, password: str, wait_for_captcha: bool = True, remote_debug_port: int = None) -> Dict[str, str]:
     """使用浏览器自动化登录阿里巴巴，获取cookie信息
 
@@ -1177,6 +1226,21 @@ def login_alibaba(username: str, password: str, wait_for_captcha: bool = True, r
         # 新版服务器环境判断（综合平台 + 配置 + 环境变量）
         is_server_like = _is_server_like_env()
         LOGGER.info(f"环境判断: is_server_like={is_server_like}, force_headless={APP_CONFIG.get('server', {}).get('force_headless')}, FORCE_SERVER_ENV={os.getenv('FORCE_SERVER_ENV')}")
+
+        # ── 浏览器存在性前置检查（避免 DrissionPage 报诡异错误） ──
+        if not remote_debug_port:
+            browser_found = _find_chromium_binary()
+            if not browser_found:
+                _update_login_progress(
+                    "captcha_manual_required",
+                    "服务器未检测到 Chrome/Chromium 浏览器，自动登录不可用",
+                )
+                raise ValueError(
+                    "服务器未检测到 Chrome/Chromium，请在 1Panel 终端执行:\n"
+                    "  apt-get update && apt-get install -y chromium-browser\n"
+                    "或使用「新标签页登录」「手动输入」功能完成登录"
+                )
+            LOGGER.info(f"检测到浏览器: {browser_found}")
 
         if remote_debug_port:
             LOGGER.info(f"使用本地Chrome远程调试模式，端口: {remote_debug_port}")
@@ -1830,6 +1894,8 @@ def api_server_info():
         "is_server_env": os.path.exists('/usr/bin/chromium') or os.path.exists('/usr/bin/chromium-browser'),
         "is_server_like": _is_server_like_env(),
         "force_headless": APP_CONFIG.get("server", {}).get("force_headless", False),
+        "browser_path": _find_chromium_binary() or None,
+        "browser_found": bool(_find_chromium_binary()),
         "timestamp": int(datetime.now().timestamp() * 1000),
     })
 
@@ -2023,19 +2089,33 @@ def api_session_submit_cookies():
     return jsonify({"success": False, "message": "无法从cookies中提取ctoken"}), 200, cors_headers
 
 
-if __name__ == "__main__":
-    ensure_runtime_dirs()
-    # 启动时从抓包文件加载凭证
-    session_mgr.load_from_capture_file()
-    # 启动 Keep-Alive 保活线程
-    if APP_CONFIG.get("keep_alive", {}).get("enabled", True):
-        session_mgr.start_keep_alive()
+# ─── 运行时初始化（python app.py 和 flask run 两种方式都会执行） ───────────
+_bootstrapped = False
 
+def _bootstrap_runtime():
+    """初始化运行时：目录 + 凭证加载 + 保活线程。模块导入时自动执行一次"""
+    global _bootstrapped
+    if _bootstrapped:
+        return
+    _bootstrapped = True
+    ensure_runtime_dirs()
+    session_mgr.load_from_capture_file()
+    if APP_CONFIG.get("keep_alive", {}).get("enabled", True):
+        try:
+            session_mgr.start_keep_alive()
+        except Exception as ka_err:
+            LOGGER.warning(f"保活线程启动失败（不影响主服务）: {ka_err}")
+
+# flask run / gunicorn / 测试客户端导入本模块时执行
+_bootstrap_runtime()
+
+
+if __name__ == "__main__":
     # 读取 server 配置
     server_cfg = APP_CONFIG.get("server", {})
     host = server_cfg.get("host", "0.0.0.0")
     port = server_cfg.get("port", 3020)
-    use_https = server_cfg.get("https", True)  # 默认开启 adhoc HTTPS，解决 Mixed Content
+    use_https = server_cfg.get("https", False)
 
     ssl_context = "adhoc" if use_https else None
     proto_label = "HTTPS" if ssl_context else "HTTP"
