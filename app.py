@@ -11,7 +11,11 @@ from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, quote, urlsplit
 
 import requests
-from flask import Flask, render_template, request, session
+import urllib3
+from flask import Flask, render_template, request, session, jsonify
+
+# 全局禁用 SSL 警告（与 session.verify=False 配合）
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -253,13 +257,17 @@ class SessionManager:
                     _update_login_progress("failed", "登录成功但未获取到ctoken，请尝试新标签页登录")
             except Exception as exc:
                 LOGGER.error(f"浏览器自动重登录异常: {exc}")
-                _update_login_progress("failed", f"自动登录失败: {str(exc)[:100]}")
+                # 关键守卫：如果 login_alibaba 已经把状态置为 captcha_manual_required，
+                # 不要覆盖它，让前端能看到这个状态并展示切换面板。
+                if _login_progress.get("status") != "captcha_manual_required":
+                    _update_login_progress("failed", f"自动登录失败: {str(exc)[:100]}")
 
             LOGGER.error("浏览器登录失败")
             return False
         except Exception as exc:
             LOGGER.error(f"自动重登录异常: {exc}")
-            _update_login_progress("failed", f"登录异常: {str(exc)[:100]}")
+            if _login_progress.get("status") != "captcha_manual_required":
+                _update_login_progress("failed", f"登录异常: {str(exc)[:100]}")
             return False
         finally:
             self._is_logging_in = False
@@ -495,6 +503,12 @@ def fetch_order_data_live(order_number: str, username: str = None, password: str
             ctoken = session_mgr.get_ctoken()
             session.cookies.update(session_mgr.get_session_cookies())
             LOGGER.info("通过自动重登录获取到新凭证")
+        elif _login_progress.get("status") == "captcha_manual_required":
+                        # 关键：自动登录遇到验证码，把状态传回前端
+                        raise ValueError(
+                            "【需要人工验证】自动登录检测到验证码无法自动处理，请点击页面顶部的「刷新登录」按钮，"
+                            "在弹出的选项中选择处理方式（重试自动 / 新标签页登录 / 手动输入凭证 / 本地Chrome远程调试）"
+                        )
 
     # 如果仍然没有ctoken，回退到抓包文件
     if not ctoken:
@@ -532,6 +546,12 @@ def fetch_order_data_live(order_number: str, username: str = None, password: str
                     response = session.get(url, timeout=30)
                     result = response.json()
                 else:
+                    # 如果是验证码导致的失败，抛出带标记的异常
+                    if _login_progress.get("status") == "captcha_manual_required":
+                        raise ValueError(
+                            "【需要人工验证】自动登录检测到验证码无法自动处理，请点击页面顶部的「刷新登录」按钮，"
+                            "在弹出的选项中选择处理方式"
+                        )
                     if session_mgr._last_refresh and session_mgr._ctoken:
                         raise ValueError(f"登录状态已过期（自动重登录失败），请重新获取最新的ctoken并使用'手动输入'功能更新，或点击'刷新登录'按钮")
                     else:
@@ -553,20 +573,32 @@ def fetch_order_data_live(order_number: str, username: str = None, password: str
                         url = f"{ONETOUCH_BASE_URL}{ONETOUCH_PATH}?ctoken={ctoken}&json={query_json_str}"
                         response = session.get(url, timeout=30)
                         result = response.json()
-                    else:
-                        raise ValueError("会话已过期且自动重登录失败，请在前端页面使用'新标签页登录'或'手动输入'功能更新凭证")
+                else:
+                    if _login_progress.get("status") == "captcha_manual_required":
+                        raise ValueError(
+                            "【需要人工验证】自动登录检测到验证码无法自动处理，请点击页面顶部的「刷新登录」按钮，"
+                            "在弹出的选项中选择处理方式"
+                        )
+                    raise ValueError("会话已过期且自动重登录失败，请在前端页面使用'新标签页登录'或'手动输入'功能更新凭证")
             
             LOGGER.info(f"成功获取订单 {order_number} 数据，尝试次数: {attempt + 1}")
             return result
             
         except requests.exceptions.RequestException as exc:
-            LOGGER.warning(f"获取订单 {order_number} 数据失败，尝试次数: {attempt + 1}/{max_retries}, 错误: {str(exc)}")
+            classified = _classify_network_error(exc)
+            LOGGER.warning(
+                "获取订单 %s 数据失败，尝试次数: %d/%d, 错误类型: %s, 错误: %s",
+                order_number, attempt + 1, max_retries,
+                classified["type"], classified["message"],
+            )
             if attempt < max_retries - 1:
                 _time.sleep(retry_delay)
                 retry_delay *= 1.5
             else:
                 LOGGER.error(f"获取订单 {order_number} 数据最终失败，已达到最大重试次数")
-                raise
+                raise RuntimeError(
+                    f"[{classified['type']}] {classified['message']} — {classified['hint']}"
+                ) from exc
 
 
 def fetch_order_data_fixture(order_number: str) -> Dict[str, Any]:
@@ -1003,11 +1035,49 @@ def build_webhook_payload(values: Dict[str, Any]) -> Dict[str, Any]:
     return {"schema": schema, "add_records": [{"values": values}]}
 
 
+def _classify_network_error(exc: Exception) -> Dict[str, str]:
+    """将网络异常分类，返回用户可读的错误信息和恢复建议"""
+    import requests.exceptions as req_exc
+
+    if isinstance(exc, req_exc.SSLError):
+        return {
+            "type": "SSL_ERROR",
+            "message": f"SSL 证书验证失败: {str(exc)[:80]}",
+            "hint": "已自动禁用证书验证重试；如持续失败请检查系统时间或网络代理配置。",
+        }
+    if isinstance(exc, req_exc.ConnectionError):
+        return {
+            "type": "CONNECTION_ERROR",
+            "message": f"无法建立网络连接: {str(exc)[:80]}",
+            "hint": "请检查服务器的网络连接、代理设置以及目标域名是否可达。",
+        }
+    if isinstance(exc, req_exc.Timeout):
+        return {
+            "type": "TIMEOUT",
+            "message": f"请求超时: {str(exc)[:80]}",
+            "hint": "目标服务器响应过慢，请稍后重试或检查网络带宽。",
+        }
+    if isinstance(exc, req_exc.HTTPError):
+        resp = getattr(exc, "response", None)
+        status = resp.status_code if resp else "?"
+        return {
+            "type": "HTTP_ERROR",
+            "message": f"HTTP {status} 错误: {str(exc)[:80]}",
+            "hint": "服务器返回错误状态码，请确认 webhook/接口是否仍然有效。",
+        }
+    return {
+        "type": type(exc).__name__,
+        "message": str(exc)[:120],
+        "hint": "发生未预期错误，请查看日志或联系管理员。",
+    }
+
+
 def send_to_wedoc(payload: Dict[str, Any], document: str = "gangqian") -> Dict[str, Any]:
     webhook_url = WEDOC_WEBHOOK_URLS.get(document, WEDOC_WEBHOOK_URLS["gangqian"])
     max_retries = 3
     retry_delay = 2  # 秒
-    
+
+    last_error: Optional[Exception] = None
     for attempt in range(max_retries):
         try:
             response = requests.post(webhook_url, json=payload, timeout=30, verify=False)
@@ -1015,14 +1085,24 @@ def send_to_wedoc(payload: Dict[str, Any], document: str = "gangqian") -> Dict[s
             LOGGER.info(f"成功发送数据到 {document} 文档，尝试次数: {attempt + 1}")
             return response.json()
         except requests.exceptions.RequestException as exc:
-            LOGGER.warning(f"发送数据到 {document} 文档失败，尝试次数: {attempt + 1}/{max_retries}, 错误: {str(exc)}")
+            last_error = exc
+            classified = _classify_network_error(exc)
+            LOGGER.warning(
+                "发送数据到 %s 文档失败（第 %d/%d 次）: [%s] %s — %s",
+                document, attempt + 1, max_retries,
+                classified["type"], classified["message"], classified["hint"],
+            )
             if attempt < max_retries - 1:
                 import time
                 time.sleep(retry_delay)
                 retry_delay *= 1.5  # 指数退避
             else:
                 LOGGER.error(f"发送数据到 {document} 文档最终失败，已达到最大重试次数")
-                raise
+                # 抛出增强的错误（包含分类信息）
+                error_detail = _classify_network_error(last_error)
+                raise RuntimeError(
+                    f"[同步{document}文档失败] {error_detail['message']} — {error_detail['hint']}"
+                ) from last_error
 
 
 def split_extra_fields(raw_value: str) -> List[str]:
@@ -1032,6 +1112,41 @@ def split_extra_fields(raw_value: str) -> List[str]:
         if field_id:
             fields.append(field_id)
     return fields
+
+
+def _is_server_like_env() -> bool:
+    """综合判断是否为"服务器环境"（需要 headless 运行 + 无法人工看浏览器窗口）
+
+    优先级：
+    1. 环境变量 FORCE_SERVER_ENV=1 → 强制当作服务器
+    2. APP_CONFIG['server']['force_headless']=True → 强制 headless
+    3. /usr/bin/chromium 存在（Linux Chromium 部署）
+    4. 非 Windows 平台且 DISPLAY 变量缺失（Linux 无桌面）
+    5. 默认：Windows 且无法检测到桌面时返回 True
+    """
+    if os.getenv("FORCE_SERVER_ENV", "").strip() in ("1", "true", "TRUE"):
+        LOGGER.info("FORCE_SERVER_ENV 环境变量已设置，强制视为服务器环境")
+        return True
+
+    server_cfg = APP_CONFIG.get("server", {})
+    if server_cfg.get("force_headless"):
+        LOGGER.info("config.json server.force_headless=true，强制 headless")
+        return True
+
+    import sys
+    linux_chromium = os.path.exists('/usr/bin/chromium') or os.path.exists('/usr/bin/chromium-browser')
+    if linux_chromium:
+        return True
+
+    if sys.platform != "win32":
+        # Linux/macOS：没有 DISPLAY 环境变量当作 headless 服务器
+        if not os.environ.get("DISPLAY"):
+            return True
+        return False
+
+    # Windows：默认当作"用户可访问"（除非显式强制）
+    # 但如果检测不到任何桌面窗口管理器，也视为服务器
+    return False
 
 
 def login_alibaba(username: str, password: str, wait_for_captcha: bool = True, remote_debug_port: int = None) -> Dict[str, str]:
@@ -1059,7 +1174,9 @@ def login_alibaba(username: str, password: str, wait_for_captcha: bool = True, r
     try:
         LOGGER.info(f"开始浏览器自动化登录阿里巴巴，账号: {username}, 等待验证码: {wait_for_captcha}")
 
-        is_server_env = os.path.exists('/usr/bin/chromium') or os.path.exists('/usr/bin/chromium-browser')
+        # 新版服务器环境判断（综合平台 + 配置 + 环境变量）
+        is_server_like = _is_server_like_env()
+        LOGGER.info(f"环境判断: is_server_like={is_server_like}, force_headless={APP_CONFIG.get('server', {}).get('force_headless')}, FORCE_SERVER_ENV={os.getenv('FORCE_SERVER_ENV')}")
 
         if remote_debug_port:
             LOGGER.info(f"使用本地Chrome远程调试模式，端口: {remote_debug_port}")
@@ -1073,10 +1190,12 @@ def login_alibaba(username: str, password: str, wait_for_captcha: bool = True, r
             _update_login_progress("running", "正在启动浏览器...")
             co = ChromiumOptions()
 
-            # 兼容新旧版本 DrissionPage API
-            _headless_val = not wait_for_captcha if not is_server_env else False
+            # headless 策略：
+            #   is_server_like=True → 永远 headless（用户看不到这个窗口）
+            #   is_server_like=False → 跟随 wait_for_captcha（等待验证码就有头）
+            _headless_val = is_server_like or (not wait_for_captcha)
 
-            if is_server_env:
+            if is_server_like:
                 co.set_argument('--headless=new')
                 co.set_argument('--no-sandbox')
                 co.set_argument('--disable-gpu')
@@ -1089,10 +1208,11 @@ def login_alibaba(username: str, password: str, wait_for_captcha: bool = True, r
                 co.set_argument('--mute-audio')
                 co.set_argument('--disable-web-security')
                 co.set_argument('--allow-running-insecure-content')
-                chromium_path = os.environ.get('CHROMIUM_PATH', '/usr/bin/chromium')
-                if os.path.exists(chromium_path):
-                    co.set_browser_path(chromium_path)
-                LOGGER.info(f"服务器环境：使用headless=new模式 + Chromium: {chromium_path}")
+                # Linux 服务器才需要显式指定 Chromium 路径
+                linux_chromium_path = os.environ.get('CHROMIUM_PATH', '/usr/bin/chromium')
+                if os.path.exists(linux_chromium_path):
+                    co.set_browser_path(linux_chromium_path)
+                LOGGER.info(f"服务器/headless模式：headless=True, chromium_path={linux_chromium_path}")
             else:
                 if isinstance(getattr(type(co), 'headless', None), property):
                     co.headless = _headless_val
@@ -1101,10 +1221,7 @@ def login_alibaba(username: str, password: str, wait_for_captcha: bool = True, r
                 co.set_argument('--no-sandbox')
                 co.set_argument('--disable-gpu')
                 co.set_argument('--disable-blink-features=AutomationControlled')
-                if not wait_for_captcha:
-                    co.set_argument('--disable-dev-shm-usage')
-                    co.set_argument('--window-size=1920,1080')
-                LOGGER.info("本地环境：使用默认浏览器")
+                LOGGER.info(f"本地模式：headless={_headless_val}")
 
             # 设置User-Agent
             try:
@@ -1121,7 +1238,7 @@ def login_alibaba(username: str, password: str, wait_for_captcha: bool = True, r
                 except TypeError:
                     page = ChromiumPage()
             except Exception as browser_err:
-                if is_server_env and 'connection fails' in str(browser_err).lower():
+                if is_server_like and 'connection fails' in str(browser_err).lower():
                     LOGGER.warning(f"Chromium连接失败，尝试指定端口重试: {browser_err}")
                     try:
                         import random
@@ -1130,7 +1247,7 @@ def login_alibaba(username: str, password: str, wait_for_captcha: bool = True, r
                         LOGGER.info(f"重试使用端口: {retry_port}")
                         page = ChromiumPage(addr_or_opts=co)
                     except Exception as retry_err:
-                        raise ValueError(f"Chromium浏览器无法启动，请检查服务器Chromium安装状态。错误: {retry_err}")
+                        raise ValueError(f"Chromium浏览器无法启动，请检查Chromium安装状态。错误: {retry_err}")
                 else:
                     raise
 
@@ -1196,7 +1313,9 @@ def login_alibaba(username: str, password: str, wait_for_captcha: bool = True, r
                     pass
 
             if captcha_found:
-                if is_server_env and not use_remote:
+                # headless 场景（无论是 Linux 服务器还是强制 headless 的 Windows 服务器）
+                # 都尝试一次自动滑块，15 秒内没通过就立刻进入人工切换面板
+                if is_server_like and not use_remote:
                     try:
                         screenshot_path = str(BASE_DIR / "tmp" / "login_screenshot.png")
                         page.get_screenshot(path=screenshot_path)
@@ -1206,7 +1325,7 @@ def login_alibaba(username: str, password: str, wait_for_captcha: bool = True, r
                         except Exception:
                             screenshot_path = None
 
-                    LOGGER.warning("服务器环境检测到验证码，尝试自动滑块验证...")
+                    LOGGER.warning("headless/服务器环境检测到验证码，尝试自动滑块验证...")
                     _update_login_progress("running", "检测到验证码，正在尝试自动处理...", screenshot_path)
 
                     try:
@@ -1237,18 +1356,33 @@ def login_alibaba(username: str, password: str, wait_for_captcha: bool = True, r
                         if "login.alibaba.com" not in current_url:
                             login_success = True
                             _update_login_progress("running", "验证码通过，登录成功！正在获取凭证...")
-                            LOGGER.info("服务器环境验证码通过，登录成功！")
+                            LOGGER.info("headless 模式验证码通过，登录成功！")
                             break
 
                     if not login_success:
-                        _update_login_progress("failed", "验证码自动处理失败，请使用\"新标签页登录\"或\"手动输入\"功能", screenshot_path)
-                        raise ValueError("服务器环境验证码自动处理失败，请使用\"新标签页登录\"或\"手动输入\"功能")
+                        _update_login_progress(
+                            "captcha_manual_required",
+                            "验证码自动处理失败，请手动选择处理方式",
+                            screenshot_path,
+                        )
+                        raise ValueError("服务器/headless环境验证码自动处理失败，请使用「刷新登录」按钮的新标签页登录或手动输入功能")
                     break
-                elif wait_for_captcha or use_remote:
+
+                elif not wait_for_captcha:
+                    # 用户明确说不等验证码
+                    _update_login_progress(
+                        "captcha_manual_required",
+                        "检测到验证码，当前模式不等待，请手动选择处理方式",
+                    )
+                    raise ValueError("检测到验证码，wait_for_captcha=False，已切换到人工处理")
+
+                else:
+                    # 有头 + 等待用户手动完成（真正的本地开发场景）
                     _update_login_progress("running", "检测到验证码！请在浏览器窗口中手动完成验证...")
                     LOGGER.warning("检测到验证码！请在浏览器窗口中手动完成验证...")
                     captcha_wait = 0
-                    while captcha_wait < 120:
+                    max_captcha_wait = 60  # 缩短到 60 秒，之前 120 秒太长
+                    while captcha_wait < max_captcha_wait:
                         _time.sleep(3)
                         captcha_wait += 3
                         current_url = page.url or ""
@@ -1275,11 +1409,12 @@ def login_alibaba(username: str, password: str, wait_for_captcha: bool = True, r
                                 break
 
                     if not login_success:
-                        _update_login_progress("failed", "验证码等待超时（2分钟），请重试或使用新标签页登录")
-                        raise ValueError("验证码等待超时（2分钟），请重试")
+                        _update_login_progress(
+                            "captcha_manual_required",
+                            f"验证码等待超时（{max_captcha_wait}秒），请手动选择处理方式",
+                        )
+                        raise ValueError(f"验证码等待超时（{max_captcha_wait}秒），请重试或使用新标签页登录")
                     break
-                else:
-                    raise ValueError("检测到验证码，需要手动登录。请在前端页面点击刷新登录按钮完成验证。")
 
             error_selectors = [
                 'tag:div@class:=error',
@@ -1299,7 +1434,10 @@ def login_alibaba(username: str, password: str, wait_for_captcha: bool = True, r
                     pass
 
         if not login_success:
-            _update_login_progress("failed", f"登录超时（{max_wait}秒），可能需要手动处理验证码")
+            _update_login_progress(
+                "captcha_manual_required",
+                f"登录超时（{max_wait}秒），请手动选择处理方式",
+            )
             raise ValueError(f"登录超时（{max_wait}秒），可能需要手动处理验证码")
 
         page.get('https://onetouch-partner.alibaba.com/ptnBase/luyou/express/list.htm')
@@ -1664,11 +1802,43 @@ def dingtalk_webhook() -> str:
         return error_msg
 
 
+# ─── 服务器信息（供前端 / bookmarklet 使用） ───────────────────────────────
+@app.route("/api/server-info")
+def api_server_info():
+    """返回当前服务器的 origin 等信息，供前端 bookmarklet 生成正确的请求 URL"""
+    # 优先级：SERVER_PUBLIC_URL（外部可达 HTTPS 地址）> SERVER_ORIGIN > 自动推断
+    public_url = os.getenv("SERVER_PUBLIC_URL", "").strip().rstrip("/")
+    server_origin = os.getenv("SERVER_ORIGIN", "").strip().rstrip("/")
+
+    if not server_origin:
+        host = request.headers.get("Host", "127.0.0.1:3020")
+        # Werkzeug 在 ssl_context='adhoc' 时会把 wsgi.url_scheme 设为 https
+        scheme = request.environ.get("wsgi.url_scheme", "http")
+        # 反向代理场景下用 X-Forwarded-Proto 覆盖
+        fwd_proto = request.headers.get("X-Forwarded-Proto")
+        if fwd_proto:
+            scheme = fwd_proto.split(",")[0].strip()
+        server_origin = f"{scheme}://{host}"
+
+    bookmarklet_origin = public_url or server_origin
+
+    return jsonify({
+        "server_origin": server_origin,
+        "bookmarklet_origin": bookmarklet_origin,
+        "has_public_url": bool(public_url),
+        "protocol": server_origin.split("://")[0],
+        "is_server_env": os.path.exists('/usr/bin/chromium') or os.path.exists('/usr/bin/chromium-browser'),
+        "is_server_like": _is_server_like_env(),
+        "force_headless": APP_CONFIG.get("server", {}).get("force_headless", False),
+        "timestamp": int(datetime.now().timestamp() * 1000),
+    })
+
+
 # ─── 会话状态 API ────────────────────────────────────────────────────────
 @app.route("/api/session/status")
 def api_session_status():
     """获取当前会话状态"""
-    return json.dumps(session_mgr.get_status(), ensure_ascii=False)
+    return jsonify(session_mgr.get_status())
 
 
 @app.route('/favicon.ico')
@@ -1684,11 +1854,11 @@ def favicon():
 def api_session_refresh():
     """手动刷新登录凭证（后台执行）"""
     if session_mgr._is_logging_in:
-        return json.dumps({
+        return jsonify({
             "success": False,
             "message": "已有登录任务进行中",
             "status": session_mgr.get_status(),
-        }, ensure_ascii=False)
+        })
 
     data = request.get_json(silent=True) or {}
     username = data.get("username") or request.form.get("username", "").strip()
@@ -1712,21 +1882,21 @@ def api_session_refresh():
     thread = threading.Thread(target=_do_login, daemon=True)
     thread.start()
 
-    return json.dumps({
+    return jsonify({
         "success": True,
         "message": "登录任务已启动",
         "status": session_mgr.get_status(),
-    }, ensure_ascii=False)
+    })
 
 
 @app.route("/api/session/check")
 def api_session_check():
     """检查会话是否有效"""
     valid = session_mgr.check_alive()
-    return json.dumps({
+    return jsonify({
         "is_valid": valid,
         "status": session_mgr.get_status(),
-    }, ensure_ascii=False)
+    })
 
 
 @app.route("/api/session/manual", methods=["POST"])
@@ -1737,7 +1907,7 @@ def api_session_manual():
     cookies_str = data.get("cookies", "").strip()
 
     if not ctoken:
-        return json.dumps({"success": False, "message": "ctoken不能为空"}, ensure_ascii=False)
+        return jsonify({"success": False, "message": "ctoken不能为空"})
 
     cookies = {}
     if cookies_str:
@@ -1773,17 +1943,17 @@ def api_session_manual():
     _save_login_cookies(cookies, ctoken)
 
     LOGGER.info(f"手动输入凭证成功，ctoken: {ctoken[:10]}...")
-    return json.dumps({
+    return jsonify({
         "success": True,
         "message": "凭证更新成功",
         "status": session_mgr.get_status(),
-    }, ensure_ascii=False)
+    })
 
 
 @app.route("/api/session/login-progress")
 def api_session_login_progress():
     """获取当前登录进度"""
-    return json.dumps(get_login_progress(), ensure_ascii=False)
+    return jsonify(get_login_progress())
 
 
 @app.route("/api/session/login-screenshot")
@@ -1800,24 +1970,21 @@ def api_session_login_screenshot():
 @app.route("/api/session/submit-cookies", methods=["POST", "OPTIONS"])
 def api_session_submit_cookies():
     """接收从浏览器新标签页提取的cookies（支持跨域）"""
+    cors_headers = {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type",
+    }
+
     if request.method == "OPTIONS":
-        resp = json.dumps({})
-        return resp, 200, {
-            "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "POST, OPTIONS",
-            "Access-Control-Allow-Headers": "Content-Type",
-        }
+        return jsonify({}), 200, cors_headers
 
     data = request.get_json(silent=True) or {}
     cookies_str = data.get("cookies", "").strip()
     ctoken = data.get("ctoken", "").strip()
 
     if not ctoken and not cookies_str:
-        return json.dumps({"success": False, "message": "未提供有效的凭证"}, ensure_ascii=False), 200, {
-            "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": "*",
-        }
+        return jsonify({"success": False, "message": "未提供有效的凭证"}), 200, cors_headers
 
     cookies = {}
     if cookies_str:
@@ -1851,15 +2018,9 @@ def api_session_submit_cookies():
         _update_login_progress("success", "通过新标签页登录成功，凭证已更新")
 
         LOGGER.info(f"通过新标签页提交凭证成功，ctoken: {ctoken[:10]}...")
-        return json.dumps({"success": True, "message": "凭证提交成功"}, ensure_ascii=False), 200, {
-            "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": "*",
-        }
+        return jsonify({"success": True, "message": "凭证提交成功"}), 200, cors_headers
 
-    return json.dumps({"success": False, "message": "无法从cookies中提取ctoken"}, ensure_ascii=False), 200, {
-        "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": "*",
-    }
+    return jsonify({"success": False, "message": "无法从cookies中提取ctoken"}), 200, cors_headers
 
 
 if __name__ == "__main__":
@@ -1869,4 +2030,14 @@ if __name__ == "__main__":
     # 启动 Keep-Alive 保活线程
     if APP_CONFIG.get("keep_alive", {}).get("enabled", True):
         session_mgr.start_keep_alive()
-    app.run(host="0.0.0.0", port=3020, debug=True)
+
+    # 读取 server 配置
+    server_cfg = APP_CONFIG.get("server", {})
+    host = server_cfg.get("host", "0.0.0.0")
+    port = server_cfg.get("port", 3020)
+    use_https = server_cfg.get("https", True)  # 默认开启 adhoc HTTPS，解决 Mixed Content
+
+    ssl_context = "adhoc" if use_https else None
+    proto_label = "HTTPS" if ssl_context else "HTTP"
+    LOGGER.info(f"启动 Flask 服务: {proto_label}://{host}:{port}")
+    app.run(host=host, port=port, debug=False, ssl_context=ssl_context)

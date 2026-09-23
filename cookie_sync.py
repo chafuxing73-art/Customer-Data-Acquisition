@@ -21,7 +21,12 @@ import json
 import re
 import sys
 import time
+
 import requests
+import urllib3
+
+# 全局禁用 SSL 警告（与 verify=False 配合）
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
 SERVER_URL = "http://192.168.24.29:3020"
@@ -91,6 +96,7 @@ def sync_cookies(server_url, cookies, ctoken):
             f"{server_url}/api/session/submit-cookies",
             json={"cookies": cookies_str, "ctoken": ctoken},
             timeout=10,
+            verify=False,
         )
         result = resp.json()
         if result.get("success"):

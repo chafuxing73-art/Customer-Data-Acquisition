@@ -176,6 +176,8 @@ def build_webhook_payload(values: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def send_webhook(webhook_url: str, payload: Dict[str, Any], timeout: int) -> Dict[str, Any]:
+    import ssl
+
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     req = request.Request(
         webhook_url,
@@ -184,7 +186,10 @@ def send_webhook(webhook_url: str, payload: Dict[str, Any], timeout: int) -> Dic
         method="POST",
     )
 
-    with request.urlopen(req, timeout=timeout) as resp:
+    # 禁用 SSL 证书验证（与 app.py 的 verify=False 保持一致）
+    ctx = ssl._create_unverified_context()
+
+    with request.urlopen(req, timeout=timeout, context=ctx) as resp:
         response_text = resp.read().decode("utf-8")
 
     try:

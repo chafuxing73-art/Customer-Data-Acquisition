@@ -28,3 +28,9 @@
 2026-06-01 16:36:55,667 [INFO] 预览 payload 已写入: F:\项目\客户数据获取\wedoc_payload_preview.json
 2026-06-01 16:36:55,667 [INFO] 发送 payload 已写入: F:\项目\客户数据获取\wedoc_webhook_payload.json
 2026-06-01 16:36:55,667 [INFO] 当前为 dry-run，未实际发送 webhook
+2026-08-07 09:33:48,923 [WARNING] 请求报文中未解析到查询单号，将直接使用入参单号: ALS01481544388
+2026-08-07 09:33:48,924 [INFO] 单号 ALS01481544388 的必要字段提取完整
+2026-08-07 09:33:48,924 [WARNING] 未提供额外空字段 schema，仅发送已确认映射字段
+2026-08-07 09:33:48,926 [INFO] 预览 payload 已写入: F:\项目\客户数据获取\wedoc_payload_preview.json
+2026-08-07 09:33:48,926 [INFO] 发送 payload 已写入: F:\项目\客户数据获取\wedoc_webhook_payload.json
+2026-08-07 09:33:48,926 [INFO] 当前为 dry-run，未实际发送 webhook

@@ -9,5 +9,11 @@
         "enabled": true,
         "interval_minutes": 30,
         "check_url": "https://onetouch-partner.alibaba.com/ptnBase/luyou/logistics/listCustomersByPartnerId.json"
+    },
+    "server": {
+        "host": "0.0.0.0",
+        "port": 3020,
+        "https": false,
+        "force_headless": false
     }
 }

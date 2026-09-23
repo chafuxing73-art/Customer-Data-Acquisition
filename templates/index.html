@@ -404,6 +404,9 @@
     <!-- Bootstrap JS -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
+        // ── 全局服务器 origin（bookmarklet 用）──
+        var SERVER_ORIGIN = window.location.origin;
+
         // 表单验证
         (function () {
             'use strict'
@@ -419,23 +422,76 @@
                     }, false)
                 })
         })()
-        
-        // 页面加载动画
+
+        // 页面加载
         window.addEventListener('DOMContentLoaded', function() {
             document.body.style.opacity = '0';
             document.body.style.transition = 'opacity 0.5s ease-in-out';
             setTimeout(function() {
                 document.body.style.opacity = '1';
             }, 100);
-            // 加载会话状态
+            // 先拉取服务器信息，再加载会话状态
+            fetchServerInfo();
             checkSessionStatus();
+            // 扫描页面是否有带"需要人工验证"标记的错误，如果有自动触发登录切换
+            autoDetectCaptchaRequired();
         });
+
+        // 如果后端返回了"需要人工验证"标记的错误，自动触发"刷新登录"流程
+        function autoDetectCaptchaRequired() {
+            var errors = document.querySelectorAll('.result.error p, .result.error');
+            for (var i = 0; i < errors.length; i++) {
+                var text = (errors[i].innerText || errors[i].textContent || '');
+                if (text.indexOf('需要人工验证') !== -1) {
+                    var statusText = document.getElementById('session-status-text');
+                    var statusBar = document.getElementById('session-status-bar');
+                    if (statusText) statusText.innerHTML = '<i class="fas fa-shield-alt me-1"></i>检测到验证码需要人工处理，请选择下方方式';
+                    if (statusBar) statusBar.className = 'alert alert-warning d-flex justify-content-between align-items-center py-2 px-3 mb-3';
+                    // 给用户 500ms 看错误消息，再触发登录切换
+                    setTimeout(function() {
+                        refreshSession();
+                    }, 500);
+                    break;
+                }
+            }
+        }
+
+        // 获取服务器 origin
+        function fetchServerInfo() {
+            fetch('/api/server-info')
+                .then(function(r) { return r.json(); })
+                .then(function(info) {
+                    // 优先使用 bookmarklet_origin（考虑了公共 HTTPS 地址），
+                    // 否则用 server_origin，最后兜底 window.location.origin
+                    if (info.bookmarklet_origin) {
+                        SERVER_ORIGIN = info.bookmarklet_origin;
+                    } else if (info.server_origin) {
+                        SERVER_ORIGIN = info.server_origin;
+                    }
+                    refreshBookmarkletLink();
+                })
+                .catch(function() {
+                    // 保持 window.location.origin 作为默认值
+                    refreshBookmarkletLink();
+                });
+        }
+
+        function refreshBookmarkletLink() {
+            var link = document.getElementById('bookmarklet-link');
+            if (link) {
+                link.href = getCookieExtractScript();
+            }
+            var input = document.getElementById('cookie-extract-script');
+            if (input) {
+                input.value = getCookieExtractScript();
+            }
+        }
 
         // 检查会话状态
         function checkSessionStatus() {
             var statusText = document.getElementById('session-status-text');
             var statusBar = document.getElementById('session-status-bar');
-            
+
             fetch('/api/session/status')
                 .then(function(resp) { return resp.json(); })
                 .then(function(data) {
@@ -451,11 +507,13 @@
         function updateStatusUI(data) {
             var statusText = document.getElementById('session-status-text');
             var statusBar = document.getElementById('session-status-bar');
-            
+
             if (data.is_valid) {
                 var refreshTime = data.last_refresh ? new Date(data.last_refresh).toLocaleString('zh-CN') : '未知';
                 statusText.innerHTML = '<i class="fas fa-check-circle me-1"></i>登录状态有效 | ctoken: ' + (data.ctoken || '无') + ' | 上次刷新: ' + refreshTime;
                 statusBar.className = 'alert alert-success d-flex justify-content-between align-items-center py-2 px-3 mb-3';
+                // 成功时关闭可能残留的验证码面板
+                dismissCaptchaPanel();
             } else {
                 statusText.innerHTML = '<i class="fas fa-times-circle me-1"></i>登录状态已过期，请点击"刷新登录"重新获取凭证';
                 statusBar.className = 'alert alert-danger d-flex justify-content-between align-items-center py-2 px-3 mb-3';
@@ -469,6 +527,8 @@
             var btn = document.getElementById('btn-refresh-session');
             var statusText = document.getElementById('session-status-text');
             var statusBar = document.getElementById('session-status-bar');
+
+            dismissCaptchaPanel();
 
             btn.disabled = true;
             btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>登录中...';
@@ -520,7 +580,17 @@
                         _loginPollTimer = null;
                         btn.disabled = false;
                         btn.innerHTML = '<i class="fas fa-sync-alt me-1"></i>刷新登录';
+                        dismissCaptchaPanel();
                         checkSessionStatus();
+                    } else if (data.status === 'captcha_manual_required') {
+                        // 关键：验证码无法自动处理，展示人工切换面板
+                        clearInterval(_loginPollTimer);
+                        _loginPollTimer = null;
+                        btn.disabled = false;
+                        btn.innerHTML = '<i class="fas fa-sync-alt me-1"></i>刷新登录';
+                        statusText.innerHTML = '<i class="fas fa-exclamation-triangle me-1"></i>' + (data.message || '自动登录遇到验证码');
+                        statusBar.className = 'alert alert-warning d-flex justify-content-between align-items-center py-2 px-3 mb-3';
+                        showCaptchaManualPanel(data);
                     } else if (data.status === 'failed') {
                         clearInterval(_loginPollTimer);
                         _loginPollTimer = null;
@@ -529,8 +599,9 @@
 
                         var msg = data.message || '自动登录失败';
                         if (msg.indexOf('验证码') !== -1) {
-                            statusText.innerHTML = '<i class="fas fa-info-circle me-1"></i>自动登录遇到验证码，请使用"新标签页登录"或"手动输入"';
+                            statusText.innerHTML = '<i class="fas fa-info-circle me-1"></i>自动登录遇到验证码，请选择下方处理方式';
                             statusBar.className = 'alert alert-warning d-flex justify-content-between align-items-center py-2 px-3 mb-3';
+                            showCaptchaManualPanel(data);
                         } else {
                             statusText.innerHTML = '<i class="fas fa-exclamation-triangle me-1"></i>' + msg;
                             statusBar.className = 'alert alert-danger d-flex justify-content-between align-items-center py-2 px-3 mb-3';
@@ -539,6 +610,101 @@
                 })
                 .catch(function() {});
             }, 2000);
+        }
+
+        // ── 验证码人工处理模式切换面板 ──
+        function showCaptchaManualPanel(data) {
+            dismissCaptchaPanel();
+
+            var bar = document.getElementById('session-status-bar');
+            var panel = document.createElement('div');
+            panel.id = 'captcha-manual-panel';
+            panel.className = 'alert alert-warning mb-3 border border-warning';
+            panel.style.cssText = 'animation: fadeIn 0.3s ease-in-out;';
+            panel.innerHTML =
+                '<div class="d-flex justify-content-between align-items-center mb-2">' +
+                    '<h6 class="mb-0"><i class="fas fa-shield-alt me-2"></i>验证码处理模式切换</h6>' +
+                    '<button type="button" class="btn-close btn-sm" onclick="dismissCaptchaPanel()" aria-label="关闭"></button>' +
+                '</div>' +
+                '<p class="small mb-2 text-muted">' + (data.message || '检测到验证码无法自动处理，请选择以下方式继续登录：') + '</p>' +
+                '<div class="row g-2">' +
+                    '<div class="col-md-6">' +
+                        '<button type="button" class="btn btn-sm btn-outline-primary w-100" onclick="refreshSession()">' +
+                            '<i class="fas fa-redo me-1"></i>重试自动登录' +
+                        '</button>' +
+                    '</div>' +
+                    '<div class="col-md-6">' +
+                        '<button type="button" class="btn btn-sm btn-outline-success w-100" onclick="openLoginInNewTab()">' +
+                            '<i class="fas fa-external-link-alt me-1"></i>新标签页登录（推荐）' +
+                        '</button>' +
+                    '</div>' +
+                    '<div class="col-md-6">' +
+                        '<button type="button" class="btn btn-sm btn-outline-warning w-100" onclick="showManualInput()">' +
+                            '<i class="fas fa-key me-1"></i>手动输入凭证' +
+                        '</button>' +
+                    '</div>' +
+                    '<div class="col-md-6">' +
+                        '<button type="button" class="btn btn-sm btn-outline-info w-100" onclick="showRemoteDebugInput()">' +
+                            '<i class="fas fa-plug me-1"></i>本地 Chrome 远程调试' +
+                        '</button>' +
+                    '</div>' +
+                '</div>' +
+                '<div id="remote-debug-input" class="mt-2" style="display:none;">' +
+                    '<div class="input-group input-group-sm">' +
+                        '<span class="input-group-text">端口</span>' +
+                        '<input type="number" id="remote-debug-port" class="form-control" placeholder="如 9222">' +
+                        '<button type="button" class="btn btn-info" onclick="startRemoteDebugLogin()"><i class="fas fa-play me-1"></i>连接登录</button>' +
+                    '</div>' +
+                    '<div class="form-text small">请先用 --remote-debugging-port=9222 启动本地 Chrome，然后在此输入端口号</div>' +
+                '</div>';
+
+            bar.parentNode.insertBefore(panel, bar.nextSibling);
+        }
+
+        function dismissCaptchaPanel() {
+            var panel = document.getElementById('captcha-manual-panel');
+            if (panel) panel.remove();
+        }
+
+        function showRemoteDebugInput() {
+            var div = document.getElementById('remote-debug-input');
+            if (div) div.style.display = (div.style.display === 'none') ? 'block' : 'none';
+        }
+
+        function startRemoteDebugLogin() {
+            var portInput = document.getElementById('remote-debug-port');
+            var port = portInput ? parseInt(portInput.value.trim(), 10) : NaN;
+            if (!port || port < 1024 || port > 65535) {
+                alert('请输入有效的远程调试端口（1024-65535）');
+                return;
+            }
+            // 用远程调试端口发起登录请求
+            var btn = document.getElementById('btn-refresh-session');
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>连接中...';
+
+            dismissCaptchaPanel();
+
+            fetch('/api/session/refresh', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({remote_debug_port: port})
+            })
+            .then(function(resp) { return resp.json(); })
+            .then(function(data) {
+                if (data.success || (data.message && data.message.indexOf('已启动') !== -1)) {
+                    pollLoginProgress();
+                } else {
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="fas fa-sync-alt me-1"></i>刷新登录';
+                    alert('启动远程调试登录失败: ' + (data.message || '未知错误'));
+                }
+            })
+            .catch(function() {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-sync-alt me-1"></i>刷新登录';
+                alert('远程调试登录请求发送失败');
+            });
         }
 
         // 每5分钟自动检查一次会话状态
@@ -588,7 +754,9 @@
         }
 
         function getCookieExtractScript() {
-            var serverUrl = window.location.origin;
+            // 使用服务器配置的 origin（而非 window.location.origin），
+            // 因为 bookmarklet 运行在阿里巴巴页面上，不能把阿里巴巴域名当服务器。
+            var serverUrl = SERVER_ORIGIN || window.location.origin;
             return "javascript:void(function(){var c=document.cookie;var ct='';var x=c.match(/xman_us_t=([^;]+)/);if(x){var m=x[1].match(/ctoken=([^&]+)/);if(m)ct=m[1];}if(ct){fetch('" + serverUrl + "/api/session/submit-cookies',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({cookies:c,ctoken:ct}),mode:'cors'}).then(function(r){return r.json();}).then(function(d){if(d.success){alert('凭证同步成功！');}else{alert('同步失败：'+d.message);}}).catch(function(e){alert('同步失败：'+e);});}else{alert('未找到ctoken，请确认已在阿里巴巴登录');}}())";
         }
 
