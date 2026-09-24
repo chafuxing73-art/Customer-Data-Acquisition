@@ -173,11 +173,17 @@ class SessionManager:
             LOGGER.warning(f"从抓包文件加载凭证失败: {exc}")
             return False
 
-    def check_alive(self) -> bool:
-        """检查当前会话是否有效"""
+    def check_session_state(self) -> str:
+        """检查当前会话状态，返回三态：
+        - "valid":   会话有效（接口正常返回且未返回过期码）
+        - "expired": 明确过期（无 ctoken，或服务端明确返回 838185）
+        - "unknown": 无法确认（网络异常、返回非 JSON 的风控/验证码/登录页等）。
+                     此时不能武断判定为过期，否则会把“订单查不到/网络抖动”误判成登录失效，
+                     进而触发自动登录并招来验证码。
+        """
         if not self._ctoken:
             self._is_expired = True
-            return False
+            return "expired"
         try:
             check_url = APP_CONFIG.get("keep_alive", {}).get(
                 "check_url",
@@ -199,18 +205,41 @@ class SessionManager:
                 "Sec-Fetch-Site": "same-origin",
             })
             resp = session.get(url, timeout=15)
-            result = resp.json()
+            try:
+                result = resp.json()
+            except ValueError:
+                # 返回非 JSON（通常是风控/验证码/登录 HTML 页面），不能据此判定登录过期
+                preview = (resp.text or "").replace("\n", " ")[:200]
+                LOGGER.warning(
+                    "会话保活检测返回非JSON响应（可能是风控/验证码页面），HTTP %s，预览: %s",
+                    resp.status_code, preview,
+                )
+                return "unknown"
             if result.get("code") == 838185:
                 LOGGER.info("会话已过期（服务端返回838185）")
                 self._is_expired = True
-                return False
+                return "expired"
             LOGGER.info("会话保活检测：有效")
             self._is_expired = False
-            return True
+            return "valid"
+        except requests.exceptions.RequestException as exc:
+            LOGGER.warning(f"会话保活检测网络异常（不判定为过期）: {exc}")
+            return "unknown"
         except Exception as exc:
-            LOGGER.warning(f"会话保活检测失败: {exc}")
-            self._is_expired = True
+            LOGGER.warning(f"会话保活检测失败（不判定为过期）: {exc}")
+            return "unknown"
+
+    def check_alive(self) -> bool:
+        """兼容旧调用的布尔判断：
+        仅在“明确过期”时返回 False；状态未知时保持当前过期标记不变，
+        需要精细区分的调用方请直接使用 check_session_state()。
+        """
+        state = self.check_session_state()
+        if state == "expired":
             return False
+        if state == "valid":
+            return True
+        return not self._is_expired
 
     def refresh_login(self, username: str = None, password: str = None, wait_for_captcha: bool = True, remote_debug_port: int = None) -> bool:
         """自动重新登录，使用浏览器自动化方式
@@ -273,8 +302,8 @@ class SessionManager:
             self._is_logging_in = False
 
     def ensure_valid(self, username: str = None, password: str = None) -> bool:
-        """确保会话有效，如果过期则自动重登录"""
-        if self.is_valid and self.check_alive():
+        """确保会话有效，仅在明确过期时才自动重登录；状态未知时不盲目触发登录"""
+        if self.is_valid and self.check_session_state() != "expired":
             return True
         LOGGER.info("会话已失效，触发自动重登录...")
         return self.refresh_login(username, password)
@@ -302,8 +331,8 @@ class SessionManager:
                     break
                 try:
                     LOGGER.info("Keep-Alive: 开始保活检测...")
-                    alive = self.check_alive()
-                    if alive:
+                    state = self.check_session_state()
+                    if state == "valid":
                         age_minutes = 0
                         if self._last_refresh:
                             age_minutes = (datetime.now() - self._last_refresh).total_seconds() / 60
@@ -311,9 +340,11 @@ class SessionManager:
                         if age_minutes > 120:
                             LOGGER.info(f"Keep-Alive: 会话已持续 {age_minutes:.0f} 分钟，主动刷新以延长有效期...")
                             self.refresh_login()
-                    else:
+                    elif state == "expired":
                         LOGGER.info("Keep-Alive: 会话已过期，尝试自动重登录...")
                         self.refresh_login()
+                    else:
+                        LOGGER.info("Keep-Alive: 会话状态未知（网络异常或风控/验证码页面），跳过本轮，不触发自动登录")
                 except Exception as exc:
                     LOGGER.error(f"Keep-Alive 异常: {exc}")
 
@@ -562,10 +593,14 @@ def fetch_order_data_live(order_number: str, username: str = None, password: str
             total = data.get("total", 0)
 
             if not data_list and total == 0 and attempt == 0:
-                LOGGER.warning(f"查询返回空数据列表，可能是会话已过期（未返回838185错误），尝试验证会话...")
-                if not session_mgr.check_alive():
-                    LOGGER.warning("会话验证确认已过期，尝试自动重登录...")
-                    session_mgr._is_expired = True
+                # 空结果首先应视为“该单号查不到数据”，不能直接当成会话过期。
+                # 只有保活接口明确返回过期标识（838185）时，才走自动重登录；
+                # 会话有效或状态无法确认（风控/验证码页、网络抖动）时，按无数据返回，
+                # 交给上层提示“未查询到订单”，避免误触发自动登录招来验证码。
+                LOGGER.info(f"订单 {order_number} 查询结果为空，确认会话状态...")
+                state = session_mgr.check_session_state()
+                if state == "expired":
+                    LOGGER.warning("会话确认已过期，尝试自动重登录...")
                     auto_login_success = session_mgr.refresh_login(username, password, wait_for_captcha=wait_for_captcha)
                     if auto_login_success:
                         ctoken = session_mgr.get_ctoken()
@@ -573,13 +608,19 @@ def fetch_order_data_live(order_number: str, username: str = None, password: str
                         url = f"{ONETOUCH_BASE_URL}{ONETOUCH_PATH}?ctoken={ctoken}&json={query_json_str}"
                         response = session.get(url, timeout=30)
                         result = response.json()
+                    else:
+                        if _login_progress.get("status") == "captcha_manual_required":
+                            raise ValueError(
+                                "【需要人工验证】自动登录检测到验证码无法自动处理，请点击页面顶部的「刷新登录」按钮，"
+                                "在弹出的选项中选择处理方式"
+                            )
+                        raise ValueError("登录状态已过期且自动重登录失败，请在前端页面使用'新标签页登录'或'手动输入'功能更新凭证")
+                elif state == "unknown":
+                    LOGGER.warning("会话状态无法确认（网络异常或风控/验证码页面），按空查询结果返回，不触发自动登录")
+                    return result
                 else:
-                    if _login_progress.get("status") == "captcha_manual_required":
-                        raise ValueError(
-                            "【需要人工验证】自动登录检测到验证码无法自动处理，请点击页面顶部的「刷新登录」按钮，"
-                            "在弹出的选项中选择处理方式"
-                        )
-                    raise ValueError("会话已过期且自动重登录失败，请在前端页面使用'新标签页登录'或'手动输入'功能更新凭证")
+                    LOGGER.info(f"会话有效，订单 {order_number} 确实查询不到数据")
+                    return result
             
             LOGGER.info(f"成功获取订单 {order_number} 数据，尝试次数: {attempt + 1}")
             return result
@@ -1832,7 +1873,11 @@ def dingtalk_webhook() -> str:
                 exc_str = str(exc)
                 if "风控" in exc_str or "RGV587" in exc_str:
                     return f"⚠️ 订单 {order_number} 查询失败：登录被阿里风控拦截，请稍后重试或联系管理员"
-                if "验证码" in exc_str or "登录" in exc_str:
+                # 验证码类错误必须优先于“登录”关键字判断（验证码提示语中也包含“登录”），
+                # 不能再笼统提示“会话已过期”，以免误导排查方向。
+                if "需要人工验证" in exc_str or "验证码" in exc_str:
+                    return f"⚠️ 订单 {order_number} 查询失败：需要人工完成验证码，请在页面点击「刷新登录」处理"
+                if "登录" in exc_str:
                     return f"⚠️ 订单 {order_number} 查询失败：登录会话已过期，请稍后重试或联系管理员"
                 return f"订单 {order_number} 查询失败: {exc_str[:50]}"
             except Exception as exc:
